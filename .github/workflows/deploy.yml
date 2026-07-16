@@ -1,0 +1,21 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    uses: Wadjinny/workflows/.github/workflows/deploy-pnpm-vite.yml@main
+    with:
+      VITE_PROJECT_DIR: frontend
+    secrets: inherit
+
+  caddy:
+    needs: [frontend]
+    uses: Wadjinny/workflows/.github/workflows/deploy-caddy-site.yml@main
+    with:
+      caddy_file: Caddyfile
+      remote_file: /etc/caddy/sites/glsl-nodes.conf
+    secrets: inherit
