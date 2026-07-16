@@ -8,6 +8,7 @@ function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
   const d = data as ShaderNodeData;
   const rows = Math.max(d.inputs.length, d.outputs.length);
   const renameNode = useGraph((s) => s.renameNode);
+  const controlFocused = useGraph((s) => s.controlFocusId === id);
   /** Rename draft; null = not editing. */
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -17,7 +18,9 @@ function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
   };
 
   return (
-    <div className={`shader-node${selected ? ' selected' : ''}`}>
+    <div
+      className={`shader-node${selected ? ' selected' : ''}${controlFocused ? ' control-focus' : ''}`}
+    >
       <div
         className="shader-node__title"
         title="Double-click to rename"

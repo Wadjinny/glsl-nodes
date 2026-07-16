@@ -23,12 +23,22 @@ interface GraphState {
   nodes: RFNode[];
   edges: Edge[];
   selectedNodeId: string | null;
+  /**
+   * Control node currently shown in the Controls panel. Visual-only — does not
+   * change React Flow selection / code-editor focus.
+   */
+  controlFocusId: string | null;
   fragSource: string | null;
   compileError: string | null;
   /** GLSL compile/link error reported by the renderer (set externally). */
   glslError: string | null;
   /** Name of the current project (null = never saved / untitled). */
   projectName: string | null;
+  /**
+   * Animation / export loop length in seconds. Live `time` in shaders is
+   * `elapsed % animDuration`.
+   */
+  animDuration: number;
   /** Bumped whenever a whole new graph is loaded; remounts React Flow so it refits the view. */
   graphRevision: number;
 
@@ -45,6 +55,8 @@ interface GraphState {
   /** Add a node at an explicit graph position; returns its id (null for unknown kind). */
   addNodeAt: (kind: string, x: number, y: number) => string | null;
   setSelected: (id: string | null) => void;
+  /** Highlight a control node in the graph without selecting it. */
+  setControlFocus: (id: string | null) => void;
   /** Rename a node (display label only; blank names are ignored). */
   renameNode: (id: string, label: string) => void;
   updateNodeGlsl: (id: string, glsl: string) => void;
@@ -65,6 +77,7 @@ interface GraphState {
   /** Paste the clipboard as fresh nodes, selected, at an offset. Returns count pasted. */
   pasteClipboard: () => number;
   setProjectName: (name: string | null) => void;
+  setAnimDuration: (seconds: number) => void;
   /** Replace the whole graph (project open / import). */
   loadProject: (name: string | null, nodes: RFNode[], edges: Edge[]) => void;
   /** Reset to the default starter graph. */
@@ -86,10 +99,12 @@ export const useGraph = create<GraphState>((set, get) => ({
   nodes: initial.nodes,
   edges: initial.edges,
   selectedNodeId: null,
+  controlFocusId: null,
   fragSource: null,
   compileError: null,
   glslError: null,
   projectName: null,
+  animDuration: 5,
   graphRevision: 0,
 
   onNodesChange: (changes) => {
@@ -196,7 +211,21 @@ export const useGraph = create<GraphState>((set, get) => ({
     return id;
   },
 
-  setSelected: (id) => set({ selectedNodeId: id }),
+  setSelected: (id) =>
+    set({
+      selectedNodeId: id,
+      // Keep React Flow's visual selection in sync (used by the Controls
+      // panel to highlight the matching node, and by the node-search menu).
+      nodes: get().nodes.map((n) => ({
+        ...n,
+        selected: id !== null && n.id === id,
+      })),
+      edges: get().edges.map((e) =>
+        e.selected ? { ...e, selected: false } : e,
+      ),
+    }),
+
+  setControlFocus: (id) => set({ controlFocusId: id }),
 
   renameNode: (id, label) => {
     const trimmed = label.trim();
@@ -364,6 +393,12 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   setProjectName: (name) => set({ projectName: name }),
+
+  setAnimDuration: (seconds) => {
+    const n = Number(seconds);
+    if (!Number.isFinite(n)) return;
+    set({ animDuration: Math.min(120, Math.max(0.1, n)) });
+  },
 
   loadProject: (name, nodes, edges) => {
     bumpIdCounterPast(nodes);

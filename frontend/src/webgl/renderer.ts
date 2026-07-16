@@ -7,6 +7,10 @@ export class Renderer {
   private vao: WebGLVertexArrayObject | null;
   private raf = 0;
   private startTime = performance.now();
+  /** When set, the clock is frozen at this wall-clock moment. */
+  private pausedAt: number | null = null;
+  /** Loop length for live `time` (seconds). */
+  private duration = 5;
   private mouse: [number, number] = [0, 0];
   /** When true, the live loop stops touching the canvas (used during export). */
   private exporting = false;
@@ -38,6 +42,44 @@ export class Renderer {
 
   getCanvas(): HTMLCanvasElement {
     return this.canvas;
+  }
+
+  setDuration(seconds: number) {
+    this.duration = Math.max(0.1, seconds);
+  }
+
+  isPaused(): boolean {
+    return this.pausedAt !== null;
+  }
+
+  setPaused(paused: boolean) {
+    if (paused && this.pausedAt === null) {
+      this.pausedAt = performance.now();
+    } else if (!paused && this.pausedAt !== null) {
+      // Keep elapsed continuous across the pause gap.
+      this.startTime += performance.now() - this.pausedAt;
+      this.pausedAt = null;
+    }
+  }
+
+  resetTime() {
+    const now = performance.now();
+    this.startTime = now;
+    if (this.pausedAt !== null) this.pausedAt = now;
+  }
+
+  /** Unbounded elapsed seconds (respects pause). */
+  getElapsed(): number {
+    const now = this.pausedAt ?? performance.now();
+    return (now - this.startTime) / 1000;
+  }
+
+  /** Looped shader time in `[0, duration)`. */
+  getTime(): number {
+    const d = this.duration;
+    const t = this.getElapsed() % d;
+    // Guard against floating-point landing on `duration`.
+    return t < 0 ? t + d : t;
   }
 
   private onPointerMove = (e: PointerEvent) => {
@@ -133,8 +175,7 @@ export class Renderer {
       if (this.program) {
         gl.useProgram(this.program);
         gl.bindVertexArray(this.vao);
-        if (this.uTime)
-          gl.uniform1f(this.uTime, (performance.now() - this.startTime) / 1000);
+        if (this.uTime) gl.uniform1f(this.uTime, this.getTime());
         if (this.uResolution)
           gl.uniform2f(this.uResolution, this.canvas.width, this.canvas.height);
         if (this.uMouse) gl.uniform2f(this.uMouse, this.mouse[0], this.mouse[1]);

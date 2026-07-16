@@ -23,18 +23,22 @@ export function PreviewPanel() {
   const compileError = useGraph((s) => s.compileError);
   const glslError = useGraph((s) => s.glslError);
   const setGlslError = useGraph((s) => s.setGlslError);
+  const animDuration = useGraph((s) => s.animDuration);
+  const setAnimDuration = useGraph((s) => s.setAnimDuration);
 
-  const [seconds, setSeconds] = useState(5);
   const [fps, setFps] = useState(30);
   const [res, setRes] = useState('Current');
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [exportErr, setExportErr] = useState<string | null>(null);
+  const [loopTime, setLoopTime] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     try {
       const renderer = new Renderer(canvasRef.current);
+      renderer.setDuration(useGraph.getState().animDuration);
       renderer.setUniformSource(() => {
         const map: Record<string, UniformValue> = {};
         for (const n of useGraph.getState().nodes) {
@@ -60,6 +64,22 @@ export function PreviewPanel() {
     setGlslError(err);
   }, [fragSource, setGlslError]);
 
+  useEffect(() => {
+    rendererRef.current?.setDuration(animDuration);
+  }, [animDuration]);
+
+  // Throttle UI clock updates — shader keeps running at full rAF.
+  useEffect(() => {
+    let id = 0;
+    const tick = () => {
+      const r = rendererRef.current;
+      if (r) setLoopTime(r.getTime());
+      id = window.setTimeout(tick, 50);
+    };
+    tick();
+    return () => window.clearTimeout(id);
+  }, []);
+
   const handleExport = async () => {
     const renderer = rendererRef.current;
     const canvas = canvasRef.current;
@@ -74,7 +94,7 @@ export function PreviewPanel() {
     setProgress(0);
     try {
       const { blob, ext } = await exportVideo(renderer, {
-        durationSec: seconds,
+        durationSec: animDuration,
         fps,
         width,
         height,
@@ -93,21 +113,62 @@ export function PreviewPanel() {
     }
   };
 
+  const togglePause = () => {
+    const r = rendererRef.current;
+    if (!r) return;
+    const next = !r.isPaused();
+    r.setPaused(next);
+    setPaused(next);
+  };
+
+  const handleReset = () => {
+    rendererRef.current?.resetTime();
+    setLoopTime(0);
+  };
+
   const error = exportErr ?? compileError ?? glslError;
+  const barPct = animDuration > 0 ? (loopTime / animDuration) * 100 : 0;
 
   return (
     <div className="panel">
       <div className="panel-header">
         <span>Preview</span>
+        <div className="time-bar" title="Looped shader time (matches export duration)">
+          <button
+            type="button"
+            className="time-bar__btn"
+            onClick={togglePause}
+            disabled={exporting}
+            title={paused ? 'Play' : 'Pause'}
+          >
+            {paused ? '▶' : '❚❚'}
+          </button>
+          <button
+            type="button"
+            className="time-bar__btn"
+            onClick={handleReset}
+            disabled={exporting}
+            title="Reset time"
+          >
+            ↺
+          </button>
+          <div className="time-bar__track">
+            <div className="time-bar__fill" style={{ width: `${barPct}%` }} />
+          </div>
+          <span className="time-bar__label">
+            {loopTime.toFixed(2)}/{animDuration.toFixed(1)}s
+          </span>
+        </div>
         <div className="export-bar">
           <input
             type="number"
-            min={1}
+            min={0.1}
             max={120}
-            value={seconds}
+            step={0.1}
+            value={animDuration}
             disabled={exporting}
-            onChange={(e) => setSeconds(Number(e.target.value))}
-            title="Duration (seconds)"
+            onChange={(e) => setAnimDuration(Number(e.target.value))}
+            title="Loop / export duration (seconds)"
           />
           <span className="export-unit">s</span>
           <select
