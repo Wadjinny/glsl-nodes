@@ -26,14 +26,23 @@ export function CodePanel() {
     [selectedNodeId, updateNodeGlsl],
   );
 
-  const editable = node && !node.data.isInput && !node.data.isOutput;
+  const editable =
+    node &&
+    !node.data.isInput &&
+    !node.data.isOutput &&
+    !node.data.isSlider &&
+    !node.data.isColor &&
+    !node.data.isVec2;
 
   return (
     <div className="panel">
       <div className="panel-header">
         <span>Shader Code{node ? ` — ${node.data.label}` : ''}</span>
         {editable && (
-          <span className="panel-hint">add inputs with // @in &lt;type&gt; &lt;name&gt;</span>
+          <span className="panel-hint">
+            uv · fragCoord · resolution · time · mouse are built in — add
+            inputs with // @in &lt;type&gt; &lt;name&gt;
+          </span>
         )}
       </div>
       <div className="panel-body">

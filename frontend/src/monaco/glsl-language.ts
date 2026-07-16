@@ -9,6 +9,22 @@ export function registerGLSL(monaco: Monaco) {
 
   monaco.languages.register({ id: 'glsl' });
 
+  // Comment syntax enables Monaco's built-in toggle shortcuts
+  // (Ctrl+/ line comment, Shift+Alt+A block comment).
+  monaco.languages.setLanguageConfiguration('glsl', {
+    comments: { lineComment: '//', blockComment: ['/*', '*/'] },
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+    ],
+  });
+
   monaco.languages.setMonarchTokensProvider('glsl', {
     keywords: [
       'attribute', 'const', 'uniform', 'varying', 'break', 'continue', 'do',
@@ -28,6 +44,8 @@ export function registerGLSL(monaco: Monaco) {
       'clamp', 'mix', 'step', 'smoothstep', 'length', 'distance', 'dot',
       'cross', 'normalize', 'reflect', 'refract', 'texture', 'texture2D',
       'gl_FragCoord', 'gl_Position', 'gl_VertexID', 'fragColor',
+      // Ambient built-ins provided by the graph compiler.
+      'uv', 'fragCoord', 'resolution', 'time', 'mouse',
     ],
     tokenizer: {
       root: [

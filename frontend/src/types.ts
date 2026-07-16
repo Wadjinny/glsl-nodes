@@ -33,6 +33,32 @@ export interface ShaderNodeData {
   min?: number;
   max?: number;
   step?: number;
+  /** True for a Color node: outputs a vec3 backed by a live uniform. */
+  isColor?: boolean;
+  /** Color state, normalized 0-1 RGB (only used when isColor). */
+  rgb?: [number, number, number];
+  /** True for a Vec2 node: outputs a vec2 backed by a live uniform (uses min/max for both axes). */
+  isVec2?: boolean;
+  /** Vec2 state (only used when isVec2). */
+  vec?: [number, number];
+}
+
+/** Normalized 0-1 RGB -> #rrggbb (for <input type="color"> and swatches). */
+export function rgbToHex(rgb: [number, number, number] | undefined): string {
+  const [r, g, b] = rgb ?? [1, 1, 1];
+  const h = (v: number) =>
+    Math.round(Math.min(1, Math.max(0, v)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+/** #rrggbb -> normalized 0-1 RGB (falls back to white on malformed input). */
+export function hexToRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return [1, 1, 1];
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 export const TYPE_COLORS: Record<GLSLType, string> = {

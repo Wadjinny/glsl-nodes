@@ -1,6 +1,6 @@
 import type { Edge } from '@xyflow/react';
 import type { RFNode } from '../nodes/library';
-import type { GLSLType } from '../types';
+import type { GLSLType, Socket } from '../types';
 import { TYPE_DEFAULT } from '../types';
 import { topoSort } from './topo';
 
@@ -19,20 +19,38 @@ export function getVertexShader(): string {
   return VERTEX_SHADER;
 }
 
-/** Map Input node output socket id -> the global variable available in main(). */
-const INPUT_GLOBALS: Record<string, { expr: string; type: GLSLType }> = {
-  uv: { expr: 'vUv', type: 'vec2' },
-  fragCoord: { expr: 'vFragCoord', type: 'vec2' },
-  resolution: { expr: 'vResolution', type: 'vec2' },
-  time: { expr: 'vTime', type: 'float' },
-  mouse: { expr: 'vMouse', type: 'vec2' },
+/**
+ * Built-in values, emitted as top-level GLSL globals assigned at the start of
+ * main() — so every node body can reference them directly (a node's `// @in`
+ * parameter of the same name shadows the global, letting a wire override it).
+ * Triple duty: the Input node's output sockets, the ambient globals, and the
+ * fallback value for an unconnected input socket with a matching name.
+ */
+const BUILTINS: Record<string, { expr: string; type: GLSLType }> = {
+  uv: { expr: 'uv', type: 'vec2' },
+  fragCoord: { expr: 'fragCoord', type: 'vec2' },
+  resolution: { expr: 'resolution', type: 'vec2' },
+  time: { expr: 'time', type: 'float' },
+  mouse: { expr: 'mouse', type: 'vec2' },
 };
+
+/** GLSL type produced at a node's output handle (null if unknown). */
+export function outputTypeOf(
+  node: RFNode,
+  handle: string | null | undefined,
+): GLSLType | null {
+  if (node.data.isInput) return handle ? BUILTINS[handle]?.type ?? null : null;
+  if (node.data.isSlider) return 'float';
+  if (node.data.isColor) return 'vec3';
+  if (node.data.isVec2) return 'vec2';
+  return node.data.outputs[0]?.type ?? null;
+}
 
 const sanitize = (id: string) => id.replace(/[^a-zA-Z0-9_]/g, '_');
 const fnName = (id: string) => `node_${sanitize(id)}`;
 const localName = (id: string) => `${fnName(id)}_out`;
 
-/** GLSL uniform name for a Slider node (also used by the renderer). */
+/** GLSL uniform name for a Slider/Color node (also used by the renderer). */
 export const uniformName = (id: string) => `uCtl_${sanitize(id)}`;
 
 /** Coerce a GLSL expression of type `from` to type `to`. */
@@ -84,29 +102,37 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
   /** Resolve the value feeding a node's input socket. */
   function resolveInput(
     nodeId: string,
-    socketId: string,
-    declaredType: GLSLType,
+    socket: Socket,
   ): { expr: string; type: GLSLType } {
-    const edge = incoming.get(`${nodeId}:${socketId}`);
-    if (!edge || !edge.sourceHandle) {
-      return { expr: TYPE_DEFAULT[declaredType], type: declaredType };
-    }
+    // Unconnected input named after a built-in reads the built-in itself
+    // (same as an explicit wire from the Input node); otherwise a zero value.
+    const fallback = () =>
+      BUILTINS[socket.name] ?? { expr: TYPE_DEFAULT[socket.type], type: socket.type };
+
+    const edge = incoming.get(`${nodeId}:${socket.id}`);
+    if (!edge || !edge.sourceHandle) return fallback();
     const src = byId.get(edge.source);
-    if (!src) return { expr: TYPE_DEFAULT[declaredType], type: declaredType };
+    if (!src) return fallback();
 
     if (src.data.isInput) {
-      const g = INPUT_GLOBALS[edge.sourceHandle];
-      if (g) return g;
-      return { expr: TYPE_DEFAULT[declaredType], type: declaredType };
+      return BUILTINS[edge.sourceHandle] ?? fallback();
     }
 
     if (src.data.isSlider) {
       return { expr: uniformName(src.id), type: 'float' };
     }
 
+    if (src.data.isColor) {
+      return { expr: uniformName(src.id), type: 'vec3' };
+    }
+
+    if (src.data.isVec2) {
+      return { expr: uniformName(src.id), type: 'vec2' };
+    }
+
     // Regular node: single output stored in a local.
     const out = src.data.outputs[0];
-    if (!out) return { expr: TYPE_DEFAULT[declaredType], type: declaredType };
+    if (!out) return fallback();
     return { expr: localName(src.id), type: out.type };
   }
 
@@ -115,7 +141,14 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
 
   for (const id of order) {
     const node = byId.get(id);
-    if (!node || node.data.isInput || node.data.isOutput || node.data.isSlider)
+    if (
+      !node ||
+      node.data.isInput ||
+      node.data.isOutput ||
+      node.data.isSlider ||
+      node.data.isColor ||
+      node.data.isVec2
+    )
       continue;
 
     const out = node.data.outputs[0];
@@ -133,7 +166,7 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
     // Invocation -> local variable.
     const args = node.data.inputs
       .map((s) => {
-        const r = resolveInput(id, s.id, s.type);
+        const r = resolveInput(id, s);
         return coerce(r.expr, r.type, s.type);
       })
       .join(', ');
@@ -144,14 +177,18 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
   const colorSocket = outputNode.data.inputs[0];
   let colorAssign = '  fragColor = vec4(0.0, 0.0, 0.0, 1.0);';
   if (colorSocket) {
-    const r = resolveInput(outputNode.id, colorSocket.id, 'vec4');
+    const r = resolveInput(outputNode.id, colorSocket);
     colorAssign = `  fragColor = ${coerce(r.expr, r.type, 'vec4')};`;
   }
 
-  // One uniform per Slider node, driven live from the Controls panel.
+  // One uniform per control node (Slider/Color/Vec2), driven live from the
+  // Controls panel.
   const sliderUniforms = nodes
-    .filter((n) => n.data.isSlider)
-    .map((n) => `uniform float ${uniformName(n.id)};`)
+    .filter((n) => n.data.isSlider || n.data.isColor || n.data.isVec2)
+    .map((n) => {
+      const type = n.data.isColor ? 'vec3' : n.data.isVec2 ? 'vec2' : 'float';
+      return `uniform ${type} ${uniformName(n.id)};`;
+    })
     .join('\n');
 
   const fragSource = `#version 300 es
@@ -163,14 +200,21 @@ uniform vec2 uMouse;
 ${sliderUniforms ? sliderUniforms + '\n' : ''}
 out vec4 fragColor;
 
+// Built-ins, ambient in every node body (assigned at the start of main()).
+vec2 uv;
+vec2 fragCoord;
+vec2 resolution;
+float time;
+vec2 mouse;
+
 ${functions.join('\n\n')}
 
 void main() {
-  vec2 vUv = gl_FragCoord.xy / uResolution;
-  vec2 vFragCoord = gl_FragCoord.xy;
-  vec2 vResolution = uResolution;
-  float vTime = uTime;
-  vec2 vMouse = uMouse;
+  uv = gl_FragCoord.xy / uResolution;
+  fragCoord = gl_FragCoord.xy;
+  resolution = uResolution;
+  time = uTime;
+  mouse = uMouse;
 ${locals.join('\n')}
 ${colorAssign}
 }

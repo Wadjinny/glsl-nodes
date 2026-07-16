@@ -1,5 +1,8 @@
 import { getVertexShader } from '../compiler/compile';
 
+/** Value for a control uniform: float (slider), vec2 (pad), or vec3 (color). */
+export type UniformValue = number | [number, number] | [number, number, number];
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private program: WebGLProgram | null = null;
@@ -15,7 +18,7 @@ export class Renderer {
   private uMouse: WebGLUniformLocation | null = null;
 
   private dynamicLocs = new Map<string, WebGLUniformLocation | null>();
-  private getUniforms: () => Record<string, number> = () => ({});
+  private getUniforms: () => Record<string, UniformValue> = () => ({});
 
   constructor(private canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', {
@@ -31,7 +34,7 @@ export class Renderer {
     this.loop();
   }
 
-  setUniformSource(fn: () => Record<string, number>) {
+  setUniformSource(fn: () => Record<string, UniformValue>) {
     this.getUniforms = fn;
   }
 
@@ -114,7 +117,11 @@ export class Renderer {
         loc = gl.getUniformLocation(this.program, name);
         this.dynamicLocs.set(name, loc);
       }
-      if (loc !== null) gl.uniform1f(loc, values[name]);
+      if (loc === null) continue;
+      const v = values[name];
+      if (typeof v === 'number') gl.uniform1f(loc, v);
+      else if (v.length === 2) gl.uniform2f(loc, v[0], v[1]);
+      else gl.uniform3f(loc, v[0], v[1], v[2]);
     }
   }
 

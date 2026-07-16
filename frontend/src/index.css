@@ -26,6 +26,97 @@ body,
 .app {
   height: 100vh;
   width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Project bar */
+.project-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #2d2d2d;
+  border-bottom: 1px solid var(--border);
+}
+.project-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #9d9d9d;
+  white-space: nowrap;
+}
+.project-name {
+  flex: 1 1 auto;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: #4ec9b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-open {
+  position: relative;
+}
+.project-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+}
+.project-menu-empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #6d6d6d;
+  white-space: nowrap;
+}
+.project-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Extra specificity: these sit inside .toolbar, whose button rule is defined later. */
+.project-bar .project-menu button {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 5px 8px;
+}
+.project-menu button.project-menu-open {
+  flex: 1 1 auto;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-menu button.project-menu-open:hover {
+  background: var(--accent);
+}
+.project-menu button.project-menu-delete {
+  flex: 0 0 auto;
+  color: #808080;
+}
+.project-menu button.project-menu-delete:hover {
+  color: var(--error);
+  background: #3a1d1d;
 }
 
 .panel {
@@ -150,12 +241,32 @@ body,
   border-radius: 6px 6px 0 0;
   background: #37373d;
 }
+.shader-node__title-input {
+  width: 100%;
+  min-width: 0;
+  background: #1e1e1e;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--text);
+  font: inherit;
+  padding: 0 4px;
+  outline: none;
+}
 .shader-node__value {
   padding: 4px 10px;
   font-family: 'SF Mono', Menlo, monospace;
   font-size: 11px;
   color: #4ec9b0;
   border-bottom: 1px solid var(--border);
+}
+.shader-node__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  margin-right: 6px;
+  vertical-align: -2px;
 }
 .shader-node__row {
   display: flex;
@@ -200,6 +311,64 @@ body,
 }
 .toolbar button:hover {
   background: var(--accent);
+}
+
+/* Wire highlighted while a dragged node hovers it (drop splices the node in) */
+.react-flow__edge.splice-target .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+/* Drop-a-wire-on-empty node search menu */
+.node-search {
+  position: absolute;
+  z-index: 1000;
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.node-search input {
+  background: #1e1e1e;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+}
+.node-search input:focus {
+  border-color: var(--accent);
+}
+.node-search__list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.node-search__list button {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.node-search__list button.active {
+  background: var(--accent);
+  color: #fff;
+}
+.node-search__empty {
+  font-size: 11px;
+  color: #6d6d6d;
+  padding: 4px 8px;
 }
 
 /* Status / errors */
@@ -257,6 +426,36 @@ body,
 .control-row input[type='range'] {
   width: 100%;
   accent-color: var(--accent);
+}
+.control-row input[type='color'] {
+  width: 100%;
+  height: 26px;
+  padding: 1px 2px;
+  background: #1e1e1e;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+/* Vec2 XY pad */
+.vec2-pad {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  background: #1e1e1e;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.vec2-pad__dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 .control-range {
   display: flex;

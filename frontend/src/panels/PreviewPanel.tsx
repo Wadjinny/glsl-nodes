@@ -31,10 +31,17 @@ export function PreviewPanel() {
     try {
       const renderer = new Renderer(canvasRef.current);
       renderer.setUniformSource(() => {
-        const map: Record<string, number> = {};
+        const map: Record<
+          string,
+          number | [number, number] | [number, number, number]
+        > = {};
         for (const n of useGraph.getState().nodes) {
           if (n.data.isSlider) {
             map[uniformName(n.id)] = n.data.value ?? 0;
+          } else if (n.data.isColor) {
+            map[uniformName(n.id)] = n.data.rgb ?? [1, 1, 1];
+          } else if (n.data.isVec2) {
+            map[uniformName(n.id)] = n.data.vec ?? [0, 0];
           }
         }
         return map;
