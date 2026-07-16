@@ -164,6 +164,8 @@ function ControlEditor({ node }: { node: RFNode }) {
 
 export function ControlsPanel() {
   const nodes = useGraph((s) => s.nodes);
+  const selectedNodeId = useGraph((s) => s.selectedNodeId);
+  const setSelected = useGraph((s) => s.setSelected);
   const setControlFocus = useGraph((s) => s.setControlFocus);
   const controls = nodes.filter((n) => isControlNode(n.data));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -178,11 +180,27 @@ export function ControlsPanel() {
     }
   }, [controls, selectedId]);
 
+  // Selecting a control node in the graph opens it here.
+  useEffect(() => {
+    if (selectedNodeId && controls.some((n) => n.id === selectedNodeId)) {
+      setSelectedId(selectedNodeId);
+    }
+  }, [selectedNodeId, controls]);
+
   // Mirror the open control onto the graph as a non-selection highlight.
   useEffect(() => {
     setControlFocus(selected?.id ?? null);
     return () => setControlFocus(null);
   }, [selected?.id, setControlFocus]);
+
+  const pickControl = (id: string) => {
+    setSelectedId(id);
+    // Deselect the graph control so the sync effect above can't pin the
+    // panel back to the previously selected node.
+    if (selectedNodeId && controls.some((n) => n.id === selectedNodeId)) {
+      setSelected(null);
+    }
+  };
 
   return (
     <div className="panel">
@@ -206,7 +224,7 @@ export function ControlsPanel() {
                           ? 'controls-nav__item is-active'
                           : 'controls-nav__item'
                       }
-                      onClick={() => setSelectedId(n.id)}
+                      onClick={() => pickControl(n.id)}
                     >
                       {n.data.isColor ? (
                         <span

@@ -7,7 +7,7 @@ import {
 import { useReactFlow, type OnConnectEnd } from '@xyflow/react';
 import { NODE_TEMPLATES } from '../../nodes/library';
 import { outputTypeOf } from '../../compiler/compile';
-import { chooseInputSocket } from '../../types';
+import { chooseInputSocket, isControlNode } from '../../types';
 import { useGraph } from '../../store';
 
 /** State for the drop-on-empty node search menu. */
@@ -79,6 +79,7 @@ export function NodeSearchMenu({
   const addNodeAt = useGraph((s) => s.addNodeAt);
   const onConnect = useGraph((s) => s.onConnect);
   const setSelected = useGraph((s) => s.setSelected);
+  const renameNode = useGraph((s) => s.renameNode);
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
 
@@ -127,11 +128,12 @@ export function NodeSearchMenu({
       }
     } else {
       // Dragged from an input: the new node feeds it.
-      const inType = fromNode.data.inputs.find(
+      const input = fromNode.data.inputs.find(
         (s) => s.id === menu.from.handleId,
-      )?.type;
+      );
       const outputs = newNode.data.outputs;
-      const chosen = outputs.find((s) => s.type === inType) ?? outputs[0];
+      const chosen =
+        outputs.find((s) => s.type === input?.type) ?? outputs[0];
       if (chosen) {
         onConnect({
           source: id,
@@ -139,6 +141,10 @@ export function NodeSearchMenu({
           target: fromNode.id,
           targetHandle: menu.from.handleId,
         });
+      }
+      // Control nodes inherit the socket name (shows in Controls panel / node title).
+      if (input?.name && isControlNode(newNode.data)) {
+        renameNode(id, input.name);
       }
     }
     setSelected(id);

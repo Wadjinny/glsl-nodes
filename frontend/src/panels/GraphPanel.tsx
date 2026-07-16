@@ -5,6 +5,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  useReactFlow,
   type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -22,8 +23,9 @@ function GraphPanelInner() {
   const onNodesChange = useGraph((s) => s.onNodesChange);
   const onEdgesChange = useGraph((s) => s.onEdgesChange);
   const onConnect = useGraph((s) => s.onConnect);
-  const addNode = useGraph((s) => s.addNode);
+  const addNodeAt = useGraph((s) => s.addNodeAt);
   const graphRevision = useGraph((s) => s.graphRevision);
+  const { screenToFlowPosition } = useReactFlow();
 
   const nodeTypes = useMemo<NodeTypes>(() => ({ shader: ShaderNode }), []);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -42,13 +44,28 @@ function GraphPanelInner() {
     reconnecting,
   );
 
+  // Place toolbar nodes in the visible viewport center (not fixed flow coords).
+  const addNodeInView = (kind: string) => {
+    const rect = bodyRef.current?.getBoundingClientRect();
+    const center = screenToFlowPosition({
+      x: (rect?.left ?? 0) + (rect?.width ?? 0) / 2,
+      y: (rect?.top ?? 0) + (rect?.height ?? 0) / 2,
+    });
+    // Small jitter so repeated adds don't stack perfectly.
+    addNodeAt(
+      kind,
+      center.x - 75 + Math.random() * 40,
+      center.y - 20 + Math.random() * 40,
+    );
+  };
+
   return (
     <div className="panel">
       <div className="panel-header">
         <span>Nodes</span>
         <div className="toolbar">
           {NODE_TEMPLATES.map((t) => (
-            <button key={t.kind} onClick={() => addNode(t.kind)}>
+            <button key={t.kind} onClick={() => addNodeInView(t.kind)}>
               + {t.label}
             </button>
           ))}
