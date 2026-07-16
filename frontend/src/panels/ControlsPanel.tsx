@@ -1,5 +1,5 @@
 import { useGraph } from '../store';
-import { hexToRgb, rgbToHex } from '../types';
+import { clamp, hexToRgb, isControlNode, rgbToHex } from '../types';
 
 export function ControlsPanel() {
   const nodes = useGraph((s) => s.nodes);
@@ -7,9 +7,7 @@ export function ControlsPanel() {
   const updateColorParam = useGraph((s) => s.updateColorParam);
   const updateVec2Param = useGraph((s) => s.updateVec2Param);
 
-  const controls = nodes.filter(
-    (n) => n.data.isSlider || n.data.isColor || n.data.isVec2,
-  );
+  const controls = nodes.filter((n) => isControlNode(n.data));
 
   return (
     <div className="panel">
@@ -31,14 +29,8 @@ export function ControlsPanel() {
                   e: React.PointerEvent<HTMLDivElement>,
                 ): [number, number] => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  const nx = Math.min(
-                    1,
-                    Math.max(0, (e.clientX - rect.left) / rect.width),
-                  );
-                  const ny = Math.min(
-                    1,
-                    Math.max(0, (e.clientY - rect.top) / rect.height),
-                  );
+                  const nx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+                  const ny = clamp((e.clientY - rect.top) / rect.height, 0, 1);
                   // Screen y grows downward; the pad's y axis grows upward.
                   return [min + nx * span, min + (1 - ny) * span];
                 };

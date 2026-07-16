@@ -149,13 +149,25 @@ body,
   min-height: 0;
 }
 
-.panel-hint {
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
+/* Small "?" badge whose tooltip carries the GLSL syntax help. */
+.panel-hint-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
   color: #6d6d6d;
-  font-family: 'SF Mono', Menlo, monospace;
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: help;
+  user-select: none;
+}
+.panel-hint-icon:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 /* Export bar */

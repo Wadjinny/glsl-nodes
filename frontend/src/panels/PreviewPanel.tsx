@@ -3,6 +3,11 @@ import { Renderer } from '../webgl/renderer';
 import { exportVideo } from '../webgl/exportVideo';
 import { useGraph } from '../store';
 import { uniformName } from '../compiler/compile';
+import {
+  controlUniformValue,
+  isControlNode,
+  type UniformValue,
+} from '../types';
 
 const RESOLUTIONS: Record<string, [number, number] | null> = {
   Current: null,
@@ -31,17 +36,10 @@ export function PreviewPanel() {
     try {
       const renderer = new Renderer(canvasRef.current);
       renderer.setUniformSource(() => {
-        const map: Record<
-          string,
-          number | [number, number] | [number, number, number]
-        > = {};
+        const map: Record<string, UniformValue> = {};
         for (const n of useGraph.getState().nodes) {
-          if (n.data.isSlider) {
-            map[uniformName(n.id)] = n.data.value ?? 0;
-          } else if (n.data.isColor) {
-            map[uniformName(n.id)] = n.data.rgb ?? [1, 1, 1];
-          } else if (n.data.isVec2) {
-            map[uniformName(n.id)] = n.data.vec ?? [0, 0];
+          if (isControlNode(n.data)) {
+            map[uniformName(n.id)] = controlUniformValue(n.data);
           }
         }
         return map;

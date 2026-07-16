@@ -1,7 +1,7 @@
 import type { Edge } from '@xyflow/react';
 import type { RFNode } from '../nodes/library';
 import type { GLSLType, Socket } from '../types';
-import { TYPE_DEFAULT } from '../types';
+import { TYPE_DEFAULT, controlUniformType, isControlNode } from '../types';
 import { topoSort } from './topo';
 
 export interface CompileResult {
@@ -40,10 +40,7 @@ export function outputTypeOf(
   handle: string | null | undefined,
 ): GLSLType | null {
   if (node.data.isInput) return handle ? BUILTINS[handle]?.type ?? null : null;
-  if (node.data.isSlider) return 'float';
-  if (node.data.isColor) return 'vec3';
-  if (node.data.isVec2) return 'vec2';
-  return node.data.outputs[0]?.type ?? null;
+  return controlUniformType(node.data) ?? node.data.outputs[0]?.type ?? null;
 }
 
 const sanitize = (id: string) => id.replace(/[^a-zA-Z0-9_]/g, '_');
@@ -118,16 +115,9 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
       return BUILTINS[edge.sourceHandle] ?? fallback();
     }
 
-    if (src.data.isSlider) {
-      return { expr: uniformName(src.id), type: 'float' };
-    }
-
-    if (src.data.isColor) {
-      return { expr: uniformName(src.id), type: 'vec3' };
-    }
-
-    if (src.data.isVec2) {
-      return { expr: uniformName(src.id), type: 'vec2' };
+    const ctlType = controlUniformType(src.data);
+    if (ctlType) {
+      return { expr: uniformName(src.id), type: ctlType };
     }
 
     // Regular node: single output stored in a local.
@@ -145,9 +135,7 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
       !node ||
       node.data.isInput ||
       node.data.isOutput ||
-      node.data.isSlider ||
-      node.data.isColor ||
-      node.data.isVec2
+      isControlNode(node.data)
     )
       continue;
 
@@ -181,14 +169,10 @@ export function compileGraph(nodes: RFNode[], edges: Edge[]): CompileResult {
     colorAssign = `  fragColor = ${coerce(r.expr, r.type, 'vec4')};`;
   }
 
-  // One uniform per control node (Slider/Color/Vec2), driven live from the
-  // Controls panel.
-  const sliderUniforms = nodes
-    .filter((n) => n.data.isSlider || n.data.isColor || n.data.isVec2)
-    .map((n) => {
-      const type = n.data.isColor ? 'vec3' : n.data.isVec2 ? 'vec2' : 'float';
-      return `uniform ${type} ${uniformName(n.id)};`;
-    })
+  // One uniform per control node, driven live from the Controls panel.
+  const controlUniforms = nodes
+    .filter((n) => isControlNode(n.data))
+    .map((n) => `uniform ${controlUniformType(n.data)} ${uniformName(n.id)};`)
     .join('\n');
 
   const fragSource = `#version 300 es
@@ -197,7 +181,7 @@ precision highp float;
 uniform float uTime;
 uniform vec2 uResolution;
 uniform vec2 uMouse;
-${sliderUniforms ? sliderUniforms + '\n' : ''}
+${controlUniforms ? controlUniforms + '\n' : ''}
 out vec4 fragColor;
 
 // Built-ins, ambient in every node body (assigned at the start of main()).

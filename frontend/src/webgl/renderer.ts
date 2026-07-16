@@ -1,7 +1,5 @@
 import { getVertexShader } from '../compiler/compile';
-
-/** Value for a control uniform: float (slider), vec2 (pad), or vec3 (color). */
-export type UniformValue = number | [number, number] | [number, number, number];
+import type { UniformValue } from '../types';
 
 export class Renderer {
   private gl: WebGL2RenderingContext;

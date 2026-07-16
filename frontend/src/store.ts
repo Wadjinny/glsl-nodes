@@ -9,7 +9,8 @@ import {
   type EdgeChange,
 } from '@xyflow/react';
 import { compileGraph, outputTypeOf } from './compiler/compile';
-import { parseInputs } from './compiler/parseInputs';
+import { parseInputs, parseOutput } from './compiler/parseInputs';
+import { chooseInputSocket, clamp, isControlNode } from './types';
 import {
   bumpIdCounterPast,
   makeDefaultGraph,
@@ -146,20 +147,16 @@ export const useGraph = create<GraphState>((set, get) => ({
     const output = node.data.outputs[0];
     if (!node.data.inputs.length || !output) return;
 
-    // Pick the input socket to receive the wire: prefer a free socket with
-    // the exact type flowing along the edge, then any free socket, then an
-    // exact-type match whose existing wire gets replaced.
     const src = nodes.find((n) => n.id === edge.source);
     const srcType = src ? outputTypeOf(src, edge.sourceHandle) : null;
     const taken = new Set(
-      edges.filter((e) => e.target === nodeId).map((e) => e.targetHandle),
+      edges
+        .filter((e) => e.target === nodeId)
+        .map((e) => e.targetHandle)
+        .filter((h): h is string => typeof h === 'string'),
     );
-    const inputs = node.data.inputs;
-    const chosen =
-      inputs.find((s) => !taken.has(s.id) && s.type === srcType) ??
-      inputs.find((s) => !taken.has(s.id)) ??
-      inputs.find((s) => s.type === srcType) ??
-      inputs[0];
+    const chosen = chooseInputSocket(node.data.inputs, srcType, taken);
+    if (!chosen) return;
 
     set({
       edges: [
@@ -213,21 +210,23 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   updateNodeGlsl: (id, glsl) => {
-    // Regular nodes derive their input sockets from `// @in` directives in
-    // the code, so re-parse on every edit. Special nodes keep their sockets.
+    // Regular nodes derive their input sockets from `// @in` directives and
+    // their output from `// @out`, so re-parse on every edit (no @out keeps
+    // the current output type). Special nodes keep their sockets.
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== id) return n;
-        if (
-          n.data.isInput ||
-          n.data.isOutput ||
-          n.data.isSlider ||
-          n.data.isColor ||
-          n.data.isVec2
-        ) {
+        if (n.data.isInput || n.data.isOutput || isControlNode(n.data)) {
           return { ...n, data: { ...n.data, glsl } };
         }
-        return { ...n, data: { ...n.data, glsl, inputs: parseInputs(glsl) } };
+        const out = parseOutput(glsl);
+        const outputs = out
+          ? [{ id: 'out', name: out.name, type: out.type }]
+          : n.data.outputs;
+        return {
+          ...n,
+          data: { ...n.data, glsl, inputs: parseInputs(glsl), outputs },
+        };
       }),
     });
 
@@ -255,7 +254,7 @@ export const useGraph = create<GraphState>((set, get) => ({
         const min = data.min ?? 0;
         const max = data.max ?? 1;
         if (typeof data.value === 'number') {
-          data.value = Math.min(max, Math.max(min, data.value));
+          data.value = clamp(data.value, min, max);
         }
         return { ...n, data };
       }),
@@ -281,10 +280,7 @@ export const useGraph = create<GraphState>((set, get) => ({
         const min = data.min ?? 0;
         const max = data.max ?? 1;
         if (data.vec) {
-          data.vec = [
-            Math.min(max, Math.max(min, data.vec[0])),
-            Math.min(max, Math.max(min, data.vec[1])),
-          ];
+          data.vec = [clamp(data.vec[0], min, max), clamp(data.vec[1], min, max)];
         }
         return { ...n, data };
       }),

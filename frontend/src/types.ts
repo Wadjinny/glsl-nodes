@@ -43,11 +43,62 @@ export interface ShaderNodeData {
   vec?: [number, number];
 }
 
+export const clamp = (v: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, v));
+
+/** Value for a control-node uniform: float (slider), vec2 (pad), or vec3 (color). */
+export type UniformValue = number | [number, number] | [number, number, number];
+
+/**
+ * Control nodes (Slider / Color / Vec2) have no GLSL body: they compile to a
+ * live uniform edited from the Controls panel. These three helpers are the
+ * single place that knows which flags make a node a control and what uniform
+ * backs it — a new control type only needs to extend them (plus its maker,
+ * hydration, and Controls-panel row).
+ */
+export function isControlNode(d: ShaderNodeData): boolean {
+  return Boolean(d.isSlider || d.isColor || d.isVec2);
+}
+
+/** GLSL type of a control node's uniform (null for non-control nodes). */
+export function controlUniformType(d: ShaderNodeData): GLSLType | null {
+  if (d.isSlider) return 'float';
+  if (d.isVec2) return 'vec2';
+  if (d.isColor) return 'vec3';
+  return null;
+}
+
+/** Current value of a control node's uniform. */
+export function controlUniformValue(d: ShaderNodeData): UniformValue {
+  if (d.isSlider) return d.value ?? 0;
+  if (d.isVec2) return d.vec ?? [0, 0];
+  if (d.isColor) return d.rgb ?? [1, 1, 1];
+  return 0;
+}
+
+/**
+ * Pick the input socket to receive a wire carrying `srcType`: prefer a free
+ * socket with the exact type, then any free socket, then an exact-type match
+ * (whose existing wire the caller replaces), then the first input.
+ */
+export function chooseInputSocket(
+  inputs: Socket[],
+  srcType: GLSLType | null,
+  taken: ReadonlySet<string> = new Set(),
+): Socket | undefined {
+  return (
+    inputs.find((s) => !taken.has(s.id) && s.type === srcType) ??
+    inputs.find((s) => !taken.has(s.id)) ??
+    inputs.find((s) => s.type === srcType) ??
+    inputs[0]
+  );
+}
+
 /** Normalized 0-1 RGB -> #rrggbb (for <input type="color"> and swatches). */
 export function rgbToHex(rgb: [number, number, number] | undefined): string {
   const [r, g, b] = rgb ?? [1, 1, 1];
   const h = (v: number) =>
-    Math.round(Math.min(1, Math.max(0, v)) * 255)
+    Math.round(clamp(v, 0, 1) * 255)
       .toString(16)
       .padStart(2, '0');
   return `#${h(r)}${h(g)}${h(b)}`;

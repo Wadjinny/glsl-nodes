@@ -31,3 +31,23 @@ export function parseInputs(glsl: string): Socket[] {
   }
   return sockets;
 }
+
+/**
+ * Derive a node's output from an optional `// @out <type> [name]` directive
+ * (the name is display-only and defaults to "out"). Returns null when absent —
+ * callers then keep the node's existing output type. The first valid directive
+ * wins; the socket id is always "out" so existing wires survive type changes.
+ */
+export function parseOutput(
+  glsl: string,
+): { type: GLSLType; name: string } | null {
+  const re =
+    /^\s*\/\/\s*@out\s+([a-zA-Z0-9_]+)(?:\s+([a-zA-Z_][a-zA-Z0-9_]*))?\s*$/;
+  for (const line of glsl.split('\n')) {
+    const m = line.match(re);
+    if (!m) continue;
+    const type = m[1] as GLSLType;
+    if (TYPES.has(type)) return { type, name: m[2] || 'out' };
+  }
+  return null;
+}

@@ -39,7 +39,7 @@ Add a **Slider** node for a `float`, a **Color** node for a `vec3`, or a **Vec2*
 
 - **Built-ins are ambient.** Every node body can use `uv`, `fragCoord`, `resolution`, `time`, and `mouse` directly — no wiring needed.
 - **Regular nodes** are GLSL functions: input sockets become parameters; the body must `return` the output type.
-- **Inputs are declared in the code.** Use `// @in <type> <name>` at the top of a node's body (types: `float`, `vec2`, `vec3`, `vec4`).
+- **The signature is declared in the code.** `// @in <type> <name>` adds an input socket; `// @out <type> [name]` sets the output type (types: `float`, `vec2`, `vec3`, `vec4`). Without an `@out`, the node keeps its current output type.
 - **An input named after a built-in falls back to that built-in when unconnected**; wiring it overrides the value (e.g. feed a warped `uv` into a node's `uv` input).
 - **Input node** exposes the same built-ins as output sockets, for when you want the dataflow explicit.
 - **Output node** takes a `color` and writes the pixel (auto-promoted to `vec4`).

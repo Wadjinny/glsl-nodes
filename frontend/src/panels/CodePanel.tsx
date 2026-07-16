@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { useGraph } from '../store';
 import { registerGLSL } from '../monaco/glsl-language';
+import { isControlNode } from '../types';
 
 export function CodePanel() {
   const selectedNodeId = useGraph((s) => s.selectedNodeId);
@@ -27,21 +28,26 @@ export function CodePanel() {
   );
 
   const editable =
-    node &&
-    !node.data.isInput &&
-    !node.data.isOutput &&
-    !node.data.isSlider &&
-    !node.data.isColor &&
-    !node.data.isVec2;
+    node && !node.data.isInput && !node.data.isOutput && !isControlNode(node.data);
 
   return (
     <div className="panel">
       <div className="panel-header">
         <span>Shader Code{node ? ` — ${node.data.label}` : ''}</span>
         {editable && (
-          <span className="panel-hint">
-            uv · fragCoord · resolution · time · mouse are built in — add
-            inputs with // @in &lt;type&gt; &lt;name&gt;
+          <span
+            className="panel-hint-icon"
+            title={[
+              'Built-ins available in every node body:',
+              'uv, fragCoord, resolution, time, mouse',
+              '',
+              '// @in <type> <name> — add an input socket',
+              '// @out <type> [name] — set the output type',
+              '',
+              'Types: float, vec2, vec3, vec4',
+            ].join('\n')}
+          >
+            ?
           </span>
         )}
       </div>

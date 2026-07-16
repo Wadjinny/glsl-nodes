@@ -1,6 +1,6 @@
 import type { Node, Edge } from '@xyflow/react';
-import type { ShaderNodeData, GLSLType } from '../types';
-import { parseInputs } from '../compiler/parseInputs';
+import type { ShaderNodeData } from '../types';
+import { parseInputs, parseOutput } from '../compiler/parseInputs';
 
 export type RFNode = Node<ShaderNodeData>;
 
@@ -119,15 +119,12 @@ export interface NodeTemplate {
 }
 
 /**
- * A regular node. Its input sockets are derived from the `// @in <type> <name>`
- * directives in `glsl`, so the code fully describes the node's signature.
+ * A regular node. Its input sockets come from `// @in <type> <name>` directives
+ * and its output from `// @out <type> [name]`, so the code fully describes the
+ * node's signature.
  */
-function regular(
-  kind: string,
-  label: string,
-  outputType: GLSLType,
-  glsl: string,
-): NodeTemplate {
+function regular(kind: string, label: string, glsl: string): NodeTemplate {
+  const out = parseOutput(glsl);
   return {
     kind,
     label,
@@ -140,7 +137,7 @@ function regular(
         label,
         glsl,
         inputs: parseInputs(glsl),
-        outputs: [{ id: 'out', name: 'out', type: outputType }],
+        outputs: [{ id: 'out', name: out?.name ?? 'out', type: out?.type ?? 'vec4' }],
       },
     }),
   };
@@ -156,58 +153,58 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
   regular(
     'gradient',
     'Gradient',
-    'vec3',
     `// @in vec2 uv
 // @in float time
+// @out vec3
 // classic animated palette
 return 0.5 + 0.5 * cos(time + uv.xyx + vec3(0.0, 2.0, 4.0));`,
   ),
   regular(
     'add',
     'Add',
-    'float',
     `// @in float a
 // @in float b
+// @out float
 return a + b;`,
   ),
   regular(
     'multiply',
     'Multiply',
-    'float',
     `// @in float a
 // @in float b
+// @out float
 return a * b;`,
   ),
   regular(
     'mix',
     'Mix',
-    'vec3',
     `// @in vec3 a
 // @in vec3 b
 // @in float t
+// @out vec3
 return mix(a, b, clamp(t, 0.0, 1.0));`,
   ),
   regular(
     'sin',
     'Sin (time)',
-    'float',
     `// @in float time
+// @out float
 return 0.5 + 0.5 * sin(time);`,
   ),
   regular(
     'uvWarp',
     'UV Warp',
-    'vec2',
     `// @in vec2 uv
 // @in float time
+// @out vec2
 return uv + 0.1 * vec2(sin(uv.y * 10.0 + time), cos(uv.x * 10.0 + time));`,
   ),
   regular(
     'circle',
     'Circle',
-    'float',
     `// @in vec2 uv
 // @in float radius
+// @out float
 // aspect-corrected: stays round on non-square canvases
 vec2 p = uv - 0.5;
 p.x *= resolution.x / resolution.y;

@@ -32,13 +32,14 @@ Data flow: **Zustand store → graph compiler → single fragment shader string 
 
 ### Node model (cross-file contracts)
 
-Three special node flavors are flagged on `ShaderNodeData` (`src/types.ts`) and special-cased everywhere: `isInput`, `isOutput`, `isSlider`. Everything else is a "regular" node — a GLSL function whose body must `return` its output type.
+Special node flavors are flagged on `ShaderNodeData` (`src/types.ts`): `isInput`, `isOutput`, plus the control nodes `isSlider` / `isColor` / `isVec2`. Everything else is a "regular" node — a GLSL function whose body must `return` its output type. **Control nodes are abstracted behind three helpers in `types.ts`** — `isControlNode()`, `controlUniformType()`, `controlUniformValue()` — which the compiler, store guards, CodePanel, and PreviewPanel all use. A new control type extends those helpers plus its maker (`library.ts`), hydration branch (`project.ts`), and Controls-panel row; nothing else should need per-flag edits.
 
 - **A regular node's input sockets are derived from its code**, not stored independently: `// @in <type> <name>` directives are parsed by `src/compiler/parseInputs.ts` (socket `id` === socket `name`). `store.updateNodeGlsl` re-parses on every edit and drops edges pointing at removed sockets. Adding a new supported type means touching `types.ts` (`GLSLType`, colors, defaults), `parseInputs.ts`, and `coerce()` in `compile.ts`.
 - **Input node** output sockets map to the same `BUILTINS` globals — it exists for explicit wiring style, not necessity, and is created from the toolbar like any other node.
-- **Slider nodes** compile to `uniform float uCtl_<id>`. `uniformName()` in `compile.ts` is the shared contract: the compiler declares the uniform, and `PreviewPanel` registers a callback (`renderer.setUniformSource`) that reads slider values straight from the store every frame. That's why dragging a slider updates the shader live without recompiling.
+- **Control nodes** (Slider/Color/Vec2) compile to `uniform <type> uCtl_<id>`. `uniformName()` in `compile.ts` is the shared contract: the compiler declares the uniform, and `PreviewPanel` registers a callback (`renderer.setUniformSource`) that reads control values straight from the store every frame. That's why dragging a control updates the shader live without recompiling.
 - **One incoming edge per input socket** is enforced in `store.onConnect` (a new connection replaces the existing edge on that target handle).
 - Node templates and the default graph (`Gradient → Output`, unwired inputs reading built-ins) live in `src/nodes/library.ts`.
+- Graph interactions each live in their own module under `src/panels/graph/`: clipboard shortcuts, splice-on-wire-drop, wire breaking/reconnect, and the drop-on-empty node search menu (`NodeSearchMenu.tsx`). `GraphPanel.tsx` just composes them.
 
 ### Project persistence
 

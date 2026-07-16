@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react';
-import { parseInputs } from './compiler/parseInputs';
+import { parseInputs, parseOutput } from './compiler/parseInputs';
 import {
   makeColorNode,
   makeInputNode,
@@ -8,7 +8,7 @@ import {
   makeVec2Node,
   type RFNode,
 } from './nodes/library';
-import type { GLSLType } from './types';
+import { clamp, type GLSLType } from './types';
 
 /** On-disk / localStorage project format. Bump when the shape changes. */
 export const PROJECT_VERSION = 1;
@@ -150,7 +150,7 @@ function hydrateNode(raw: unknown): RFNode | null {
     node.data.min = min;
     node.data.max = max;
     node.data.step = num(d.step, 0.01);
-    node.data.value = Math.min(max, Math.max(min, num(d.value, min)));
+    node.data.value = clamp(num(d.value, min), min, max);
     return withLabel(node);
   }
   if (d.isVec2) {
@@ -161,8 +161,8 @@ function hydrateNode(raw: unknown): RFNode | null {
     node.data.max = max;
     const raw = Array.isArray(d.vec) ? d.vec : [];
     node.data.vec = [
-      Math.min(max, Math.max(min, num(raw[0], min))),
-      Math.min(max, Math.max(min, num(raw[1], min))),
+      clamp(num(raw[0], min), min, max),
+      clamp(num(raw[1], min), min, max),
     ];
     return withLabel(node);
   }
@@ -170,17 +170,19 @@ function hydrateNode(raw: unknown): RFNode | null {
     const node = makeColorNode(n.id, x, y);
     const raw = Array.isArray(d.rgb) ? d.rgb : [];
     node.data.rgb = [
-      Math.min(1, Math.max(0, num(raw[0], 1))),
-      Math.min(1, Math.max(0, num(raw[1], 1))),
-      Math.min(1, Math.max(0, num(raw[2], 1))),
+      clamp(num(raw[0], 1), 0, 1),
+      clamp(num(raw[1], 1), 0, 1),
+      clamp(num(raw[2], 1), 0, 1),
     ];
     return withLabel(node);
   }
 
   const glsl = typeof d.glsl === 'string' ? d.glsl : '';
+  // An `// @out` directive in the code wins; otherwise trust the stored type.
+  const parsedOut = parseOutput(glsl);
   const outs = Array.isArray(d.outputs) ? d.outputs : [];
   const firstOut = outs[0] as { type?: unknown } | undefined;
-  const outType =
+  const storedType =
     typeof firstOut?.type === 'string' && GLSL_TYPES.has(firstOut.type)
       ? (firstOut.type as GLSLType)
       : 'vec4';
@@ -194,7 +196,13 @@ function hydrateNode(raw: unknown): RFNode | null {
       label: typeof d.label === 'string' ? d.label : 'Node',
       glsl,
       inputs: parseInputs(glsl),
-      outputs: [{ id: 'out', name: 'out', type: outType }],
+      outputs: [
+        {
+          id: 'out',
+          name: parsedOut?.name ?? 'out',
+          type: parsedOut?.type ?? storedType,
+        },
+      ],
     },
   };
 }
