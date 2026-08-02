@@ -1,16 +1,43 @@
-import { memo, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { TYPE_COLORS, rgbToHex, type ShaderNodeData } from '../types';
+import { memo, useEffect, useMemo, useState } from 'react';
+import {
+  Handle,
+  Position,
+  useUpdateNodeInternals,
+  type NodeProps,
+} from '@xyflow/react';
+import {
+  TYPE_COLORS,
+  isFuncNode,
+  rgbToHex,
+  type ShaderNodeData,
+} from '../types';
 import { useGraph } from '../store';
 import type { RFNode } from './library';
 
 function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
   const d = data as ShaderNodeData;
-  const rows = Math.max(d.inputs.length, d.outputs.length);
+  const sig = d.funcSignature ?? [];
   const renameNode = useGraph((s) => s.renameNode);
   const controlFocused = useGraph((s) => s.controlFocusId === id);
-  /** Rename draft; null = not editing. */
+  const updateNodeInternals = useUpdateNodeInternals();
   const [draft, setDraft] = useState<string | null>(null);
+  const funcDef = isFuncNode(d);
+
+  // React Flow caches handle positions; new @in/@out sockets must force a
+  // remeasure or the handle DOM exists but won't accept connections.
+  const handleLayoutKey = useMemo(
+    () =>
+      [
+        ...d.inputs.map((s) => `i:${s.id}:${s.type}`),
+        ...d.outputs.map((s) => `o:${s.id}:${s.type}`),
+        `sig:${sig.map((s) => `${s.type}:${s.name}`).join(',')}`,
+      ].join('|'),
+    [d.inputs, d.outputs, sig],
+  );
+
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, handleLayoutKey, updateNodeInternals]);
 
   const commit = () => {
     if (draft !== null) renameNode(id, draft);
@@ -19,7 +46,7 @@ function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
 
   return (
     <div
-      className={`shader-node${selected ? ' selected' : ''}${controlFocused ? ' control-focus' : ''}`}
+      className={`shader-node${selected ? ' selected' : ''}${controlFocused ? ' control-focus' : ''}${funcDef ? ' shader-node--func' : ''}`}
     >
       <div
         className="shader-node__title"
@@ -30,13 +57,13 @@ function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
         }}
       >
         {draft === null ? (
-          d.label
+          <>
+            {d.label}
+            {funcDef && <span className="shader-node__badge">func</span>}
+          </>
         ) : (
           <input
-            // nodrag: keep React Flow from starting a node drag on the input.
             className="shader-node__title-input nodrag"
-            // size=1 kills the input's intrinsic ~20ch width so it doesn't
-            // widen the (content-sized) node; CSS width fills the title bar.
             size={1}
             value={draft}
             autoFocus
@@ -67,47 +94,57 @@ function ShaderNodeComponent({ id, data, selected }: NodeProps<RFNode>) {
           {rgbToHex(d.rgb)}
         </div>
       )}
+      {funcDef && sig.length > 0 && (
+        <div className="shader-node__sig">
+          ({sig.map((s) => `${s.type} ${s.name}`).join(', ')})
+        </div>
+      )}
       <div>
-        {Array.from({ length: rows }).map((_, i) => {
-          const input = d.inputs[i];
-          const output = d.outputs[i];
-          return (
-            <div key={i} className="shader-node__row">
-              <div style={{ flex: 1 }}>
-                {input && (
-                  <>
-                    <Handle
-                      id={input.id}
-                      type="target"
-                      position={Position.Left}
-                      style={{ background: TYPE_COLORS[input.type] }}
-                    />
-                    <span className="shader-node__socket-label">
-                      {input.name}
-                      <span className="shader-node__type">{input.type}</span>
-                    </span>
-                  </>
-                )}
+        {Array.from({ length: Math.max(d.inputs.length, d.outputs.length) }).map(
+          (_, i) => {
+            const input = d.inputs[i];
+            const output = d.outputs[i];
+            return (
+              <div
+                key={input?.id ?? `out-${output?.id ?? i}`}
+                className="shader-node__row"
+              >
+                <div style={{ flex: 1 }}>
+                  {input && (
+                    <>
+                      <Handle
+                        id={input.id}
+                        type="target"
+                        position={Position.Left}
+                        style={{ background: TYPE_COLORS[input.type] }}
+                      />
+                      <span className="shader-node__socket-label">
+                        {input.name}
+                        <span className="shader-node__type">{input.type}</span>
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  {output && (
+                    <>
+                      <span className="shader-node__socket-label">
+                        <span className="shader-node__type">{output.type}</span>
+                        {output.name}
+                      </span>
+                      <Handle
+                        id={output.id}
+                        type="source"
+                        position={Position.Right}
+                        style={{ background: TYPE_COLORS[output.type] }}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
-              <div style={{ flex: 1, textAlign: 'right' }}>
-                {output && (
-                  <>
-                    <span className="shader-node__socket-label">
-                      <span className="shader-node__type">{output.type}</span>
-                      {output.name}
-                    </span>
-                    <Handle
-                      id={output.id}
-                      type="source"
-                      position={Position.Right}
-                      style={{ background: TYPE_COLORS[output.type] }}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
+            );
+          },
+        )}
       </div>
     </div>
   );

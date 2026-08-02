@@ -1,4 +1,11 @@
-export type GLSLType = 'float' | 'vec2' | 'vec3' | 'vec4';
+export type GLSLType =
+  | 'float'
+  | 'vec2'
+  | 'vec3'
+  | 'vec4'
+  | 'mat2'
+  | 'mat3'
+  | 'func';
 
 export interface Socket {
   /** Stable id used as the React Flow handle id. */
@@ -17,9 +24,21 @@ export interface ShaderNodeData {
   /**
    * GLSL function body. For a regular node it must `return` a value of the
    * (single) output's type, and may reference each input socket by `name`.
+   * `@type func` nodes define a callable GLSL function (graph out is `func`).
    * Input and Output nodes are special-cased by the compiler and ignore this.
    */
   glsl: string;
+  /**
+   * When set, the compiler emits this as the GLSL function name instead of
+   * `node_<id>`, so other node bodies can call it by name.
+   */
+  glslName?: string;
+  /**
+   * Signature params for `@type func` nodes (from `@fin` / legacy value
+   * `@in`s). Not graph wires — shown as labels; used when emitting the GLSL
+   * function. Graph `@in`s on func nodes are closed-over specializations.
+   */
+  funcSignature?: Socket[];
   inputs: Socket[];
   outputs: Socket[];
   /** True for the special Input node (provides built-in globals). */
@@ -58,6 +77,11 @@ export type UniformValue = number | [number, number] | [number, number, number];
  */
 export function isControlNode(d: ShaderNodeData): boolean {
   return Boolean(d.isSlider || d.isColor || d.isVec2);
+}
+
+/** True when this node defines a callable GLSL function (`@type func` / out func). */
+export function isFuncNode(d: ShaderNodeData): boolean {
+  return d.outputs[0]?.type === 'func';
 }
 
 /** GLSL type of a control node's uniform (null for non-control nodes). */
@@ -117,6 +141,9 @@ export const TYPE_COLORS: Record<GLSLType, string> = {
   vec2: '#4ec9b0',
   vec3: '#569cd6',
   vec4: '#c586c0',
+  mat2: '#d7ba7d',
+  mat3: '#ce9178',
+  func: '#dcdcaa',
 };
 
 export const TYPE_DEFAULT: Record<GLSLType, string> = {
@@ -124,4 +151,8 @@ export const TYPE_DEFAULT: Record<GLSLType, string> = {
   vec2: 'vec2(0.0)',
   vec3: 'vec3(0.0)',
   vec4: 'vec4(0.0)',
+  mat2: 'mat2(1.0)',
+  mat3: 'mat3(1.0)',
+  // Unconnected func inputs are a compile-time error; placeholder unused.
+  func: '/* missing func */',
 };

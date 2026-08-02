@@ -9,7 +9,20 @@ import {
   type EdgeChange,
 } from '@xyflow/react';
 import { compileGraph, outputTypeOf } from './compiler/compile';
-import { parseInputs, parseOutput } from './compiler/parseInputs';
+import { parseInputs, parseOutput, parseFuncSignature } from './compiler/parseInputs';
+import {
+  canRedo,
+  canUndo,
+  historyCounts,
+  isNodeDragSession,
+  noteNodeDragEnd,
+  noteNodeDragStart,
+  pushHistory,
+  redoHistory,
+  undoHistory,
+  withHistoryPaused,
+  type HistorySnapshot,
+} from './history';
 import { chooseInputSocket, clamp, isControlNode } from './types';
 import {
   bumpIdCounterPast,
@@ -41,6 +54,15 @@ interface GraphState {
   animDuration: number;
   /** Bumped whenever a whole new graph is loaded; remounts React Flow so it refits the view. */
   graphRevision: number;
+  /**
+   * Shared GLSL inserted once before node functions (defines / globals from
+   * ShaderToy import). Empty for normal projects.
+   */
+  glslPreamble: string;
+  /** Length of the undo stack (for UI). */
+  historyPast: number;
+  /** Length of the redo stack (for UI). */
+  historyFuture: number;
 
   onNodesChange: (changes: NodeChange<RFNode>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -78,10 +100,19 @@ interface GraphState {
   pasteClipboard: () => number;
   setProjectName: (name: string | null) => void;
   setAnimDuration: (seconds: number) => void;
+  /** Edit the shared preamble (#define / globals). */
+  setGlslPreamble: (preamble: string) => void;
   /** Replace the whole graph (project open / import). */
-  loadProject: (name: string | null, nodes: RFNode[], edges: Edge[]) => void;
+  loadProject: (
+    name: string | null,
+    nodes: RFNode[],
+    edges: Edge[],
+    preamble?: string,
+  ) => void;
   /** Reset to the default starter graph. */
   newProject: () => void;
+  undo: () => boolean;
+  redo: () => boolean;
   recompile: () => void;
 }
 
@@ -95,9 +126,38 @@ let clipboard: { nodes: RFNode[]; edges: Edge[] } | null = null;
 /** Paste count since the last copy — each paste lands a bit further down-right. */
 let pasteSeq = 0;
 
+function snap(s: {
+  nodes: RFNode[];
+  edges: Edge[];
+  glslPreamble: string;
+}): HistorySnapshot {
+  return {
+    nodes: s.nodes,
+    edges: s.edges,
+    glslPreamble: s.glslPreamble,
+  };
+}
+
+function syncHistoryFlags(
+  set: (partial: Partial<GraphState>) => void,
+): void {
+  const c = historyCounts();
+  set({ historyPast: c.past, historyFuture: c.future });
+}
+
+function record(
+  get: () => GraphState,
+  set: (partial: Partial<GraphState>) => void,
+  opts?: { coalesce?: boolean },
+): void {
+  pushHistory(snap(get()), opts);
+  syncHistoryFlags(set);
+}
+
 export const useGraph = create<GraphState>((set, get) => ({
   nodes: initial.nodes,
   edges: initial.edges,
+  glslPreamble: '',
   selectedNodeId: null,
   controlFocusId: null,
   fragSource: null,
@@ -106,8 +166,33 @@ export const useGraph = create<GraphState>((set, get) => ({
   projectName: null,
   animDuration: 5,
   graphRevision: 0,
+  historyPast: 0,
+  historyFuture: 0,
 
   onNodesChange: (changes) => {
+    const onlySelect = changes.every((c) => c.type === 'select');
+    if (!onlySelect) {
+      const startingDrag = changes.some(
+        (c) => c.type === 'position' && c.dragging === true,
+      );
+      const endingDrag = changes.some(
+        (c) => c.type === 'position' && c.dragging === false,
+      );
+
+      if (startingDrag) {
+        noteNodeDragStart(snap(get()));
+        syncHistoryFlags(set);
+      } else if (endingDrag) {
+        noteNodeDragEnd();
+      } else if (!isNodeDragSession()) {
+        const structural = changes.some(
+          (c) =>
+            c.type === 'remove' || c.type === 'add' || c.type === 'replace',
+        );
+        if (structural) record(get, set);
+      }
+    }
+
     set({ nodes: applyNodeChanges(changes, get().nodes) });
     const sel = changes.find((c) => c.type === 'select' && c.selected);
     if (sel && 'id' in sel) set({ selectedNodeId: sel.id });
@@ -115,11 +200,19 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   onEdgesChange: (changes) => {
+    const onlySelect = changes.every((c) => c.type === 'select');
+    if (
+      !onlySelect &&
+      changes.some((c) => c.type === 'remove' || c.type === 'add')
+    ) {
+      record(get, set);
+    }
     set({ edges: applyEdgeChanges(changes, get().edges) });
     if (changes.some((c) => c.type === 'remove')) get().recompile();
   },
 
   onConnect: (connection) => {
+    record(get, set);
     // One incoming edge per input socket: drop any existing edge on that target.
     const filtered = get().edges.filter(
       (e) =>
@@ -133,6 +226,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   reconnectEdge: (oldEdgeId, connection) => {
+    record(get, set);
     // Drop the old edge plus whatever occupies the destination input socket
     // (same one-edge-per-input rule as onConnect).
     const filtered = get().edges.filter(
@@ -148,6 +242,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   deleteEdge: (id) => {
+    record(get, set);
     set({ edges: get().edges.filter((e) => e.id !== id) });
     get().recompile();
   },
@@ -173,6 +268,7 @@ export const useGraph = create<GraphState>((set, get) => ({
     const chosen = chooseInputSocket(node.data.inputs, srcType, taken);
     if (!chosen) return;
 
+    record(get, set);
     set({
       edges: [
         ...edges.filter(
@@ -206,6 +302,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   addNodeAt: (kind, x, y) => {
     const template = NODE_TEMPLATES.find((t) => t.kind === kind);
     if (!template) return null;
+    record(get, set);
     const id = nextId(kind);
     set({ nodes: [...get().nodes, template.make(id, x, y)] });
     return id;
@@ -230,18 +327,21 @@ export const useGraph = create<GraphState>((set, get) => ({
   renameNode: (id, label) => {
     const trimmed = label.trim();
     if (!trimmed) return;
+    const cur = get().nodes.find((n) => n.id === id);
+    if (!cur || cur.data.label === trimmed) return;
+    record(get, set);
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, label: trimmed } } : n,
       ),
     });
-    // No recompile: labels are display-only (GLSL names come from node ids).
   },
 
   updateNodeGlsl: (id, glsl) => {
-    // Regular nodes derive their input sockets from `// @in` directives and
-    // their output from `// @out`, so re-parse on every edit (no @out keeps
-    // the current output type). Special nodes keep their sockets.
+    const cur = get().nodes.find((n) => n.id === id);
+    if (!cur || cur.data.glsl === glsl) return;
+    record(get, set, { coalesce: true });
+    // Regular / func nodes derive sockets from directives on every edit.
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== id) return n;
@@ -252,16 +352,26 @@ export const useGraph = create<GraphState>((set, get) => ({
         const outputs = out
           ? [{ id: 'out', name: out.name, type: out.type }]
           : n.data.outputs;
+        const sig = parseFuncSignature(glsl);
+        const { callInputs: _drop, ...rest } = n.data;
         return {
           ...n,
-          data: { ...n.data, glsl, inputs: parseInputs(glsl), outputs },
+          data: {
+            ...rest,
+            glsl,
+            inputs: parseInputs(glsl),
+            outputs,
+            ...(sig.length ? { funcSignature: sig } : { funcSignature: undefined }),
+          },
         };
       }),
     });
 
-    // Drop edges pointing at input handles that no longer exist.
     const valid = new Map(
-      get().nodes.map((n) => [n.id, new Set(n.data.inputs.map((s) => s.id))]),
+      get().nodes.map((n) => [
+        n.id,
+        new Set(n.data.inputs.map((s) => s.id)),
+      ]),
     );
     set({
       edges: get().edges.filter((e) => {
@@ -275,11 +385,11 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   updateSliderParam: (id, patch) => {
+    record(get, set, { coalesce: true });
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== id) return n;
         const data = { ...n.data, ...patch };
-        // Keep value within [min, max].
         const min = data.min ?? 0;
         const max = data.max ?? 1;
         if (typeof data.value === 'number') {
@@ -288,39 +398,39 @@ export const useGraph = create<GraphState>((set, get) => ({
         return { ...n, data };
       }),
     });
-    // No recompile: slider value/range are pushed live via the uniform source.
   },
 
   updateColorParam: (id, rgb) => {
+    record(get, set, { coalesce: true });
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, rgb } } : n,
       ),
     });
-    // No recompile: the color is pushed live via the uniform source.
   },
 
   updateVec2Param: (id, patch) => {
+    record(get, set, { coalesce: true });
     set({
       nodes: get().nodes.map((n) => {
         if (n.id !== id) return n;
         const data = { ...n.data, ...patch };
-        // Keep both axes within [min, max].
         const min = data.min ?? 0;
         const max = data.max ?? 1;
         if (data.vec) {
-          data.vec = [clamp(data.vec[0], min, max), clamp(data.vec[1], min, max)];
+          data.vec = [
+            clamp(data.vec[0], min, max),
+            clamp(data.vec[1], min, max),
+          ];
         }
         return { ...n, data };
       }),
     });
-    // No recompile: the value is pushed live via the uniform source.
   },
 
   setGlslError: (err) => set({ glslError: err }),
 
   copySelection: () => {
-    // Output is excluded: the graph should keep exactly one.
     const picked = get().nodes.filter((n) => n.selected && !n.data.isOutput);
     if (!picked.length) return 0;
     const ids = new Set(picked.map((n) => n.id));
@@ -335,6 +445,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   cutSelection: () => {
     const count = get().copySelection();
     if (!count) return 0;
+    record(get, set);
     const ids = new Set(
       get()
         .nodes.filter((n) => n.selected && !n.data.isOutput)
@@ -355,6 +466,7 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   pasteClipboard: () => {
     if (!clipboard) return 0;
+    record(get, set);
     pasteSeq += 1;
     const offset = 40 * pasteSeq;
 
@@ -400,11 +512,20 @@ export const useGraph = create<GraphState>((set, get) => ({
     set({ animDuration: Math.min(120, Math.max(0.1, n)) });
   },
 
-  loadProject: (name, nodes, edges) => {
+  setGlslPreamble: (preamble) => {
+    if (preamble === get().glslPreamble) return;
+    record(get, set, { coalesce: true });
+    set({ glslPreamble: preamble });
+    get().recompile();
+  },
+
+  loadProject: (name, nodes, edges, preamble = '') => {
+    record(get, set);
     bumpIdCounterPast(nodes);
     set({
       nodes,
       edges,
+      glslPreamble: preamble,
       projectName: name,
       selectedNodeId: null,
       glslError: null,
@@ -414,10 +535,12 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   newProject: () => {
+    record(get, set);
     const graph = makeDefaultGraph();
     set({
       nodes: graph.nodes,
       edges: graph.edges,
+      glslPreamble: '',
       projectName: null,
       selectedNodeId: null,
       glslError: null,
@@ -426,9 +549,45 @@ export const useGraph = create<GraphState>((set, get) => ({
     get().recompile();
   },
 
+  undo: () => {
+    if (!canUndo()) return false;
+    const restored = undoHistory(snap(get()));
+    if (!restored) return false;
+    withHistoryPaused(() => {
+      set({
+        nodes: restored.nodes,
+        edges: restored.edges,
+        glslPreamble: restored.glslPreamble,
+        selectedNodeId: restored.nodes.find((n) => n.selected)?.id ?? null,
+        glslError: null,
+      });
+      get().recompile();
+    });
+    syncHistoryFlags(set);
+    return true;
+  },
+
+  redo: () => {
+    if (!canRedo()) return false;
+    const restored = redoHistory(snap(get()));
+    if (!restored) return false;
+    withHistoryPaused(() => {
+      set({
+        nodes: restored.nodes,
+        edges: restored.edges,
+        glslPreamble: restored.glslPreamble,
+        selectedNodeId: restored.nodes.find((n) => n.selected)?.id ?? null,
+        glslError: null,
+      });
+      get().recompile();
+    });
+    syncHistoryFlags(set);
+    return true;
+  },
+
   recompile: () => {
-    const { nodes, edges } = get();
-    const { fragSource, error } = compileGraph(nodes, edges);
+    const { nodes, edges, glslPreamble } = get();
+    const { fragSource, error } = compileGraph(nodes, edges, glslPreamble);
     set({ fragSource, compileError: error });
   },
 }));

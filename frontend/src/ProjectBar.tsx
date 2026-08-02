@@ -9,16 +9,22 @@ import {
   saveProjectToLocal,
   serializeProject,
 } from './project';
+import { ImportShaderToyModal } from './shadertoy/ImportShaderToyModal';
 
 export function ProjectBar() {
   const projectName = useGraph((s) => s.projectName);
   const setProjectName = useGraph((s) => s.setProjectName);
   const loadProject = useGraph((s) => s.loadProject);
   const newProject = useGraph((s) => s.newProject);
+  const undo = useGraph((s) => s.undo);
+  const redo = useGraph((s) => s.redo);
+  const historyPast = useGraph((s) => s.historyPast);
+  const historyFuture = useGraph((s) => s.historyFuture);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [savedList, setSavedList] = useState(listSavedProjects);
   const [status, setStatus] = useState<string | null>(null);
+  const [stOpen, setStOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const statusTimer = useRef(0);
@@ -51,8 +57,8 @@ export function ProjectBar() {
       .prompt('Save project as:', projectName ?? 'untitled')
       ?.trim();
     if (!name) return;
-    const { nodes, edges } = useGraph.getState();
-    saveProjectToLocal(serializeProject(name, nodes, edges));
+    const { nodes, edges, glslPreamble } = useGraph.getState();
+    saveProjectToLocal(serializeProject(name, nodes, edges, glslPreamble));
     setProjectName(name);
     setSavedList(listSavedProjects());
     flash('Saved');
@@ -68,8 +74,8 @@ export function ProjectBar() {
     }
     if (!window.confirm(`Open "${name}"? Unsaved changes will be lost.`)) return;
     try {
-      const { nodes, edges } = hydrateProject(file);
-      loadProject(name, nodes, edges);
+      const { nodes, edges, preamble } = hydrateProject(file);
+      loadProject(name, nodes, edges, preamble);
     } catch (e) {
       window.alert(
         `Could not open project: ${e instanceof Error ? e.message : String(e)}`,
@@ -84,8 +90,8 @@ export function ProjectBar() {
   };
 
   const handleExport = () => {
-    const { nodes, edges } = useGraph.getState();
-    const file = serializeProject(projectName ?? 'untitled', nodes, edges);
+    const { nodes, edges, glslPreamble, projectName: pname } = useGraph.getState();
+    const file = serializeProject(pname ?? 'untitled', nodes, edges, glslPreamble);
     const blob = new Blob([JSON.stringify(file, null, 2)], {
       type: 'application/json',
     });
@@ -107,8 +113,8 @@ export function ProjectBar() {
     if (!f) return;
     if (!window.confirm('Importing replaces the current graph. Continue?')) return;
     try {
-      const { name, nodes, edges } = parseProject(await f.text());
-      loadProject(name, nodes, edges);
+      const { name, nodes, edges, preamble } = parseProject(await f.text());
+      loadProject(name, nodes, edges, preamble);
       flash('Imported');
     } catch (e) {
       window.alert(
@@ -162,7 +168,22 @@ export function ProjectBar() {
         </div>
         <button onClick={handleSave}>Save</button>
         <button onClick={handleImportClick}>Import</button>
+        <button onClick={() => setStOpen(true)}>Import ShaderToy</button>
         <button onClick={handleExport}>Export</button>
+        <button
+          onClick={() => undo()}
+          disabled={historyPast === 0}
+          title="Undo (Ctrl+Z)"
+        >
+          Undo
+        </button>
+        <button
+          onClick={() => redo()}
+          disabled={historyFuture === 0}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          Redo
+        </button>
       </div>
       <input
         ref={fileRef}
@@ -173,6 +194,13 @@ export function ProjectBar() {
           void handleImportFile(e.target.files?.[0]);
           e.target.value = '';
         }}
+      />
+      <ImportShaderToyModal
+        open={stOpen}
+        onClose={() => setStOpen(false)}
+        onImported={(n) =>
+          flash(n > 0 ? `Imported (${n} warning${n === 1 ? '' : 's'})` : 'Imported')
+        }
       />
     </div>
   );

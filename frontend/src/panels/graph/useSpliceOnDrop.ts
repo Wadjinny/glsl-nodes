@@ -3,11 +3,12 @@ import type { Edge, OnNodeDrag } from '@xyflow/react';
 import type { RFNode } from '../../nodes/library';
 import { useGraph } from '../../store';
 
-/** Can this node be spliced into this edge? Needs an input and an output, and must not already be an endpoint. */
+/** Can this node be spliced into this edge? Needs value in/out, and must not already be an endpoint. */
 function canSplice(node: RFNode, edge: Edge): boolean {
   return (
-    node.data.inputs.length > 0 &&
+    node.data.inputs.some((s) => s.type !== 'func') &&
     node.data.outputs.length > 0 &&
+    node.data.outputs[0]?.type !== 'func' &&
     edge.source !== node.id &&
     edge.target !== node.id
   );

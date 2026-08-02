@@ -13,6 +13,7 @@ import { ShaderNode } from '../nodes/ShaderNode';
 import { NODE_TEMPLATES } from '../nodes/library';
 import { useGraph } from '../store';
 import { useClipboardShortcuts } from './graph/useClipboardShortcuts';
+import { useHistoryShortcuts } from './graph/useHistoryShortcuts';
 import { useSpliceOnDrop } from './graph/useSpliceOnDrop';
 import { useWireBreaking } from './graph/useWireBreaking';
 import { NodeSearchMenu, useNodeSearchMenu } from './graph/NodeSearchMenu';
@@ -31,6 +32,7 @@ function GraphPanelInner() {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useClipboardShortcuts();
+  useHistoryShortcuts();
   const { displayEdges, onNodeDrag, onNodeDragStop } = useSpliceOnDrop(edges);
   const {
     onReconnectStart,

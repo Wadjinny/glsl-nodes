@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react';
-import { parseInputs, parseOutput } from './compiler/parseInputs';
+import { parseInputs, parseOutput, parseFuncSignature } from './compiler/parseInputs';
 import {
   makeColorNode,
   makeInputNode,
@@ -17,6 +17,8 @@ export interface ProjectFile {
   app: 'glsl-nodes';
   version: number;
   name: string;
+  /** Shared GLSL preamble (defines / globals). Optional for older files. */
+  preamble?: string;
   nodes: Array<{
     id: string;
     position: { x: number; y: number };
@@ -28,6 +30,9 @@ export interface ProjectFile {
     sourceHandle?: string | null;
     target: string;
     targetHandle?: string | null;
+    data?: Record<string, unknown>;
+    className?: string;
+    style?: Record<string, unknown>;
   }>;
 }
 
@@ -35,8 +40,9 @@ export function serializeProject(
   name: string,
   nodes: RFNode[],
   edges: Edge[],
+  preamble = '',
 ): ProjectFile {
-  return {
+  const file: ProjectFile = {
     app: 'glsl-nodes',
     version: PROJECT_VERSION,
     name,
@@ -45,14 +51,26 @@ export function serializeProject(
       position: { x: n.position.x, y: n.position.y },
       data: n.data,
     })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      sourceHandle: e.sourceHandle ?? null,
-      target: e.target,
-      targetHandle: e.targetHandle ?? null,
-    })),
+    edges: edges.map((e) => {
+      const row: ProjectFile['edges'][number] = {
+        id: e.id,
+        source: e.source,
+        sourceHandle: e.sourceHandle ?? null,
+        target: e.target,
+        targetHandle: e.targetHandle ?? null,
+      };
+      if (e.data && typeof e.data === 'object') {
+        row.data = e.data as Record<string, unknown>;
+      }
+      if (typeof e.className === 'string') row.className = e.className;
+      if (e.style && typeof e.style === 'object') {
+        row.style = e.style as Record<string, unknown>;
+      }
+      return row;
+    }),
   };
+  if (preamble.trim()) file.preamble = preamble;
+  return file;
 }
 
 /** Parse a project file's JSON text into a runtime graph. Throws on invalid input. */
@@ -60,6 +78,7 @@ export function parseProject(text: string): {
   name: string;
   nodes: RFNode[];
   edges: Edge[];
+  preamble: string;
 } {
   let data: unknown;
   try {
@@ -82,6 +101,7 @@ export function hydrateProject(input: unknown): {
   name: string;
   nodes: RFNode[];
   edges: Edge[];
+  preamble: string;
 } {
   const file = input as Partial<ProjectFile> | null;
   if (!file || typeof file !== 'object' || file.app !== 'glsl-nodes') {
@@ -108,7 +128,9 @@ export function hydrateProject(input: unknown): {
     typeof file.name === 'string' && file.name.trim()
       ? file.name.trim()
       : 'untitled';
-  return { name, nodes, edges: hydrateEdges(file.edges, nodes) };
+  const preamble =
+    typeof file.preamble === 'string' ? file.preamble : '';
+  return { name, nodes, edges: hydrateEdges(file.edges, nodes), preamble };
 }
 
 const GLSL_TYPES: ReadonlySet<string> = new Set([
@@ -116,6 +138,9 @@ const GLSL_TYPES: ReadonlySet<string> = new Set([
   'vec2',
   'vec3',
   'vec4',
+  'mat2',
+  'mat3',
+  'func',
 ]);
 
 function num(v: unknown, fallback: number): number {
@@ -178,7 +203,7 @@ function hydrateNode(raw: unknown): RFNode | null {
   }
 
   const glsl = typeof d.glsl === 'string' ? d.glsl : '';
-  // An `// @out` directive in the code wins; otherwise trust the stored type.
+  // Directives win; otherwise trust the stored output type.
   const parsedOut = parseOutput(glsl);
   const outs = Array.isArray(d.outputs) ? d.outputs : [];
   const firstOut = outs[0] as { type?: unknown } | undefined;
@@ -186,6 +211,7 @@ function hydrateNode(raw: unknown): RFNode | null {
     typeof firstOut?.type === 'string' && GLSL_TYPES.has(firstOut.type)
       ? (firstOut.type as GLSLType)
       : 'vec4';
+  const sig = parseFuncSignature(glsl);
 
   return {
     id: n.id,
@@ -195,6 +221,10 @@ function hydrateNode(raw: unknown): RFNode | null {
       kind: typeof d.kind === 'string' ? d.kind : 'custom',
       label: typeof d.label === 'string' ? d.label : 'Node',
       glsl,
+      ...(typeof d.glslName === 'string' && d.glslName.trim()
+        ? { glslName: d.glslName.trim() }
+        : {}),
+      ...(sig.length ? { funcSignature: sig } : {}),
       inputs: parseInputs(glsl),
       outputs: [
         {
@@ -225,6 +255,9 @@ function hydrateEdges(rawEdges: unknown[], nodes: RFNode[]): Edge[] {
       sourceHandle?: unknown;
       target?: unknown;
       targetHandle?: unknown;
+      data?: unknown;
+      className?: unknown;
+      style?: unknown;
     } | null;
     if (!e || typeof e.source !== 'string' || typeof e.target !== 'string') {
       return;
@@ -242,13 +275,19 @@ function hydrateEdges(rawEdges: unknown[], nodes: RFNode[]): Edge[] {
     if (seenIds.has(id)) id = `e_${i}_${id}`;
     seenIds.add(id);
 
-    edges.push({
+    const edge: Edge = {
       id,
       source: e.source,
       sourceHandle,
       target: e.target,
       targetHandle,
-    });
+    };
+    if (e.data && typeof e.data === 'object') edge.data = e.data as Edge['data'];
+    if (typeof e.className === 'string') edge.className = e.className;
+    if (e.style && typeof e.style === 'object') {
+      edge.style = e.style as Edge['style'];
+    }
+    edges.push(edge);
   });
   return edges;
 }
