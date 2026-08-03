@@ -72,8 +72,9 @@ export function ImportShaderToyModal({ open, onClose, onImported }: Props) {
         <div className="st-modal-body">
           <p className="st-modal-hint">
             Paste a ShaderToy fragment (mainImage + helpers). Helpers become
-            func nodes; calls are wired as func inputs. Defines/globals go in a
-            shared preamble. Replaces the current graph.
+            func nodes; calls are wired as func inputs. Void helpers with a
+            single inout/out param are rewritten to return that value. Defines
+            and globals go in a shared preamble. Replaces the current graph.
           </p>
           <div className="st-modal-editor">
             <Editor

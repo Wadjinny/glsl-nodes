@@ -9,6 +9,26 @@ import {
 const UNSUPPORTED_BUILTIN_RE =
   /\b(iChannel\d*|iDate|iFrame|iSampleRate|iChannelTime|iChannelResolution)\b/;
 
+/** Common GLSL builtins sometimes used as local variable names in ShaderToy. */
+const SHADOWABLE_BUILTINS = [
+  'mix',
+  'step',
+  'mod',
+  'dot',
+  'min',
+  'max',
+  'clamp',
+  'pow',
+  'length',
+  'normalize',
+  'reflect',
+  'sign',
+  'floor',
+  'ceil',
+  'fract',
+  'abs',
+];
+
 /**
  * Remap ShaderToy builtins to glsl-nodes names. Longer / more specific
  * replacements first so `.xy` / `.z` forms win over bare identifiers.
@@ -46,6 +66,41 @@ export function remapBuiltins(code: string): {
     );
   }
 
+  const unshadow = unshadowBuiltinLocals(out);
+  out = unshadow.code;
+  warnings.push(...unshadow.warnings);
+
+  return { code: out, warnings };
+}
+
+/**
+ * Rename locals that shadow GLSL builtins (`bool mix = …`) so they don't
+ * break calls like `mix(a, b, t)`. Call sites `mix(` are left alone.
+ */
+function unshadowBuiltinLocals(code: string): {
+  code: string;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  let out = code;
+  for (const name of SHADOWABLE_BUILTINS) {
+    const declRe = new RegExp(
+      `\\b((?:bool|float|int|vec2|vec3|vec4|mat2|mat3)\\s+)${name}\\b`,
+    );
+    if (!declRe.test(out)) continue;
+    const alias = `${name}_var`;
+    out = out.replace(
+      new RegExp(
+        `\\b((?:bool|float|int|vec2|vec3|vec4|mat2|mat3)\\s+)${name}\\b`,
+        'g',
+      ),
+      `$1${alias}`,
+    );
+    out = out.replace(new RegExp(`\\b${name}\\b(?!\\s*\\()`, 'g'), alias);
+    warnings.push(
+      `Renamed local '${name}' to '${alias}' to avoid shadowing the GLSL builtin.`,
+    );
+  }
   return { code: out, warnings };
 }
 
@@ -58,6 +113,11 @@ export interface ConvertedFunction {
   isFunc: boolean;
   warnings: string[];
   skipped?: string;
+  /**
+   * When set, this helper was a `void` with a single inout/out param rewritten
+   * to return that value. Call sites should assign arg[`inoutAssignArg`].
+   */
+  inoutAssignArg?: number;
 }
 
 function inParams(params: ParsedParam[]): ParsedParam[] {
@@ -114,6 +174,9 @@ function buildFuncDirectives(
  * Convert a parsed function into a node GLSL body.
  * Helpers become `@type func` nodes; `mainImage` stays a value node.
  * `callees` are other imported functions this body calls → `@fin func` wires.
+ *
+ * `void` helpers with a single `inout`/`out` value param are rewritten to
+ * return that value (call sites get assignment rewrites in importGraph).
  */
 export function convertFunction(
   fn: ParsedFunction,
@@ -125,7 +188,17 @@ export function convertFunction(
     return convertMainImage(fn, callees);
   }
 
+  const inoutLike = fn.params.filter(
+    (p) => p.qualifier === 'out' || p.qualifier === 'inout',
+  );
+
   if (fn.returnType === 'void') {
+    if (
+      inoutLike.length === 1 &&
+      isSupportedSocketType(inoutLike[0].type)
+    ) {
+      return convertInoutVoid(fn, callees, inoutLike[0]);
+    }
     return {
       name: fn.name,
       glsl: '',
@@ -147,17 +220,14 @@ export function convertFunction(
     };
   }
 
-  const outs = fn.params.filter(
-    (p) => p.qualifier === 'out' || p.qualifier === 'inout',
-  );
-  if (outs.length) {
+  if (inoutLike.length) {
     return {
       name: fn.name,
       glsl: '',
       outType: fn.returnType,
       isFunc: true,
       warnings,
-      skipped: `Skipped '${fn.name}': out/inout parameters are not supported.`,
+      skipped: `Skipped '${fn.name}': out/inout parameters are not supported on non-void functions.`,
     };
   }
 
@@ -179,6 +249,50 @@ export function convertFunction(
     outType: fn.returnType,
     isFunc: true,
     warnings,
+  };
+}
+
+/**
+ * `void Foo(inout T x, …)` → `T Foo(T x, …) { …; return x; }`
+ */
+function convertInoutVoid(
+  fn: ParsedFunction,
+  callees: string[],
+  target: ParsedParam,
+): ConvertedFunction {
+  const warnings: string[] = [];
+  const outType = target.type as GLSLType;
+  const argIndex = fn.params.indexOf(target);
+
+  warnings.push(
+    `Rewrote void ${fn.name}(${target.qualifier} ${target.type} ${target.name}, …) to return ${outType}; call sites assign the result.`,
+  );
+
+  // Former inout/out becomes a normal value parameter.
+  const params = fn.params.filter((p) => isSupportedSocketType(p.type));
+  const { headers, warnings: dw } = buildFuncDirectives(
+    params,
+    outType,
+    callees,
+  );
+  warnings.push(...dw);
+
+  const remapped = remapBuiltins(fn.body);
+  warnings.push(...remapped.warnings);
+
+  const body = remapped.code.trim();
+  const withReturn = /(?:^|\n)\s*return\b/.test(body)
+    ? body
+    : `${body}\nreturn ${target.name};`;
+
+  const glsl = formatGlsl([...headers, '', withReturn].join('\n'));
+  return {
+    name: fn.name,
+    glsl,
+    outType,
+    isFunc: true,
+    warnings,
+    inoutAssignArg: argIndex >= 0 ? argIndex : 0,
   };
 }
 

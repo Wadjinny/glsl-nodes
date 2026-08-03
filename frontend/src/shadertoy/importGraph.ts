@@ -4,8 +4,10 @@ import {
   parseInputs,
   parseOutput,
 } from '../compiler/parseInputs';
+import { formatGlsl } from '../glsl/formatGlsl';
 import { makeOutputNode, nextId, type RFNode } from '../nodes/library';
 import { findCallees } from './callGraph';
+import { rewriteInoutCallSites } from './inoutRewrite';
 import { parseShaderToy } from './parse';
 import { convertFunction, remapBuiltins } from './remap';
 
@@ -59,6 +61,7 @@ export function importShaderToyGraph(source: string): ImportShaderToyResult {
     callees: string[];
   };
   const built: Built[] = [];
+  const inoutAssignByCallee = new Map<string, number>();
 
   for (const fn of parsed.functions) {
     const bodyRemap = remapBuiltins(fn.body);
@@ -68,6 +71,9 @@ export function importShaderToyGraph(source: string): ImportShaderToyResult {
     if (converted.skipped) {
       warnings.push(converted.skipped);
       continue;
+    }
+    if (converted.inoutAssignArg !== undefined) {
+      inoutAssignByCallee.set(fn.name, converted.inoutAssignArg);
     }
     built.push({
       fnName: fn.name,
@@ -80,6 +86,17 @@ export function importShaderToyGraph(source: string): ImportShaderToyResult {
 
   if (built.length === 0) {
     throw new Error('No importable functions (all skipped).');
+  }
+
+  // Statement calls to rewritten inout voids → assign return value.
+  if (inoutAssignByCallee.size > 0) {
+    for (const b of built) {
+      const rewritten = rewriteInoutCallSites(b.glsl, inoutAssignByCallee);
+      warnings.push(...rewritten.warnings);
+      if (rewritten.code !== b.glsl) {
+        b.glsl = formatGlsl(rewritten.code);
+      }
+    }
   }
 
   const byName = new Map(built.map((b) => [b.fnName, b]));
