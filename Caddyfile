@@ -1,4 +1,4 @@
-glsl-nodes.w-ilyas.site {
+glsl-nodes.w-ilyas.ink, glsl-nodes.w-ilyas.site {
 	encode gzip
 	root * /home/ubuntu/thinkering/glsl-nodes
 	try_files {path} /index.html
